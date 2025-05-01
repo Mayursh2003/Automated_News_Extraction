@@ -1,0 +1,48 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+
+# Environment variables
+.env
+
+# PIP installer script
+get-pip.py
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# macOS / Linux system files
+.DS_Store
+*.swp
+
+# Log files
+*.log
+
+# IDE/editor specific
+.vscode/
+.idea/
+
+# Python egg files
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Compiled C files
+*.so
+
+# Coverage reports
+htmlcov/
+.coverage
+coverage.xml
+*.cover
+*.py,cover
+
+# PyInstaller
+*.manifest
+*.spec
