@@ -1,21 +1,20 @@
-import requests
-from bs4 import BeautifulSoup
+from fastapi import FastAPI
 from transformers import pipeline
-import torch
-from datetime import datetime
+from bs4 import BeautifulSoup
 from pyairtable import Table
-import os
-import time
+from datetime import datetime
+import torch, os, requests
 
-# Load summarizer model on CUDA
+app = FastAPI()
+
+# Load model on GPU if available
 device = 0 if torch.cuda.is_available() else -1
 summarizer = pipeline("summarization", model="facebook/bart-large-cnn", device=device)
 
-# Airtable setup (set these via environment variables or hardcode for local testing)
-AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY") or "pat9v6A8Gtgt7YJBW.1db41060c62cc46e2fa15841a9a2038b7e309306ddc4c32af81440942b603950"
-BASE_ID = "app4TiP7ZblxV2Wyh"
-TABLE_NAME = "News extractor"
-
+# Airtable config (use Railway variables in production)
+AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
+BASE_ID = os.getenv("BASE_ID", "app4TiP7ZblxV2Wyh")
+TABLE_NAME = os.getenv("TABLE_NAME", "News extractor")
 table = Table(AIRTABLE_API_KEY, BASE_ID, TABLE_NAME)
 
 def extract_article_text(url):
@@ -34,24 +33,19 @@ def detect_country(text):
 
 def detect_category(text):
     text_lower = text.lower()
-    if any(w in text_lower for w in ["trade", "tariff", "import"]):
-        return "Trade"
-    if any(w in text_lower for w in ["economy", "gdp", "inflation"]):
-        return "Economy"
-    if any(w in text_lower for w in ["election", "government", "policy"]):
-        return "Politics"
-    if any(w in text_lower for w in ["ai", "tech", "startup"]):
-        return "Technology"
-    if any(w in text_lower for w in ["cricket", "football", "olympics"]):
-        return "Sports"
+    if any(w in text_lower for w in ["trade", "tariff", "import"]): return "Trade"
+    if any(w in text_lower for w in ["economy", "gdp", "inflation"]): return "Economy"
+    if any(w in text_lower for w in ["election", "government", "policy"]): return "Politics"
+    if any(w in text_lower for w in ["ai", "tech", "startup"]): return "Technology"
+    if any(w in text_lower for w in ["cricket", "football", "olympics"]): return "Sports"
     return "Other"
 
-def process_pending_articles():
+def process_articles():
     records = table.all()
     for record in records:
         fields = record.get("fields", {})
         url = fields.get("URL", "")
-        if url and not fields.get("Headline"):  # Only process incomplete entries
+        if url and not fields.get("Headline"):
             print(f"🔍 Processing: {url}")
             full_text = extract_article_text(url)
             if not full_text.strip():
@@ -66,9 +60,13 @@ def process_pending_articles():
                 "Country": country,
                 "Category": category
             })
-            print("✅ Record updated.\n")
+            print("✅ Record updated.")
 
-# Run once or periodically
-if __name__ == "__main__":
-    print("🚀 Running article processor...")
-    process_pending_articles()
+@app.get("/")
+def health_check():
+    return {"message": "📰 News Summarizer API is running"}
+
+@app.get("/run")
+def run_summary():
+    process_articles()
+    return {"status": "✅ All articles processed"}
