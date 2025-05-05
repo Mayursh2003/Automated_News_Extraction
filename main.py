@@ -13,17 +13,19 @@ AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 AIRTABLE_TABLE_NAME = "News extractor"
 
-DEEPSEEK_URL = "https://api.deepseek.com/v1/summarize"
-DEEPSEEK_MODEL = "deepseek-reasoner"
+DEEPSEEK_URL = "https://api.deepseek.com/v1/"
+DEEPSEEK_MODEL = "deepseek-chat"
 
 # Request schema
 class ArticleInput(BaseModel):
     url: str
 
-@app.get("/")
-def root():
-    return {"message": "FastAPI is live 🚀"}
-
+@app.post("/process_url")
+async def process_url(request: Request):
+    print("Raw request body:", await request.body())
+    data = await request.json()
+    print("Parsed JSON:", data)
+    
 # Helper to infer country and category
 def infer_country_category(text: str):
     text_lower = text.lower()
