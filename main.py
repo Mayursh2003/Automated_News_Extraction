@@ -1,48 +1,49 @@
+import os
+import requests
 from fastapi import FastAPI
 from pydantic import BaseModel
-from newspaper import Article
 from datetime import datetime
-import os
-import uvicorn
-
+from newspaper import Article
 from langchain.llms import OpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
 app = FastAPI()
 
-# Use DeepSeek through OpenAI-compatible format
-DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
-DEEPSEEK_MODEL = "deepseek-chat"  # or "deepseek-reasoner" if you're using that
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Environment variables
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
+AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
+AIRTABLE_TABLE_NAME = "News extractor"  # Change if needed
 
-# Schema
+# DeepSeek API URL
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+DEEPSEEK_MODEL = "deepseek-reasoner"
+
+# FastAPI request schema
 class ArticleRequest(BaseModel):
     url: str
     country: str
     category: str
 
-# LangChain setup with DeepSeek
-llm = OpenAI(
-    temperature=0.2,
-    openai_api_base=DEEPSEEK_BASE_URL,
-    openai_api_key=OPENAI_API_KEY,
-    model_name=DEEPSEEK_MODEL
-)
-
-prompt = PromptTemplate(
-    input_variables=["article"],
-    template="""
-You are a professional news summarizer. Summarize the article below in under 200 words.
-
-ARTICLE:
-{article}
-
-SUMMARY:
-"""
-)
-
-chain = LLMChain(llm=llm, prompt=prompt)
+def save_to_airtable(data: dict):
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
+    headers = {
+        "Authorization": f"Bearer {AIRTABLE_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "fields": {
+            "URL": data["url"],
+            "Country": data["country"],
+            "Category": data["category"],
+            "Headline": data["Headline"],
+            "Date": data["Date"],
+            "Summary": data["Summary"]
+        }
+    }
+    response = requests.post(url, headers=headers, json=payload)
+    return response.status_code, response.text
 
 @app.post("/process_url")
 async def process_url(data: ArticleRequest):
@@ -54,15 +55,25 @@ async def process_url(data: ArticleRequest):
         if not article.text.strip():
             return {"error": "No content extracted from article."}
 
-        summary = chain.run(article=article.text)
+        # Use DeepSeek to summarize
+        deepseek_response = requests.post(
+            f"{DEEPSEEK_BASE_URL}/summarize",
+            json={"model": DEEPSEEK_MODEL, "text": article.text},
+            headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"}
+        )
+        deepseek_data = deepseek_response.json()
 
+        # Extract summary from DeepSeek response
+        summary = deepseek_data.get('summary', 'No summary available.')
+
+        # Format publication date
         pub_date = article.publish_date
         if isinstance(pub_date, datetime):
             pub_date = pub_date.strftime('%Y-%m-%d')
         else:
             pub_date = str(datetime.utcnow().date())
 
-        return {
+        result = {
             "url": data.url,
             "country": data.country,
             "category": data.category,
@@ -71,8 +82,14 @@ async def process_url(data: ArticleRequest):
             "Summary": summary.strip()
         }
 
+        # Save data to Airtable
+        save_to_airtable(result)
+
+        return result
+
     except Exception as e:
         return {"error": str(e)}
 
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
