@@ -4,7 +4,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from datetime import datetime
 from newspaper import Article
-from langchain.llms import OpenAI
+from langchain_community.llms import OpenAI
+
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
@@ -21,6 +22,10 @@ DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 DEEPSEEK_MODEL = "deepseek-reasoner"
 
 # FastAPI request schema
+@app.get("/")
+def root():
+    return {"message": "API is running!"}
+
 class ArticleRequest(BaseModel):
     url: str
     country: str
