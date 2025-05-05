@@ -32,3 +32,7 @@ Install dependencies with:
 
 ```bash
 pip install -r requirements.txt
+
+Install the new package:
+
+pip install -U langchain-community
