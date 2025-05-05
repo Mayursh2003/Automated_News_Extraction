@@ -8,34 +8,32 @@ import uvicorn
 from langchain.llms import OpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-from langchain.llms.base import LLM
 
-# FastAPI instance
 app = FastAPI()
 
-# DeepSeek configuration
-os.environ["OPENAI_API_KEY"] = "sk-xxx"  # Replace at deploy, NOT in code directly
+# Use DeepSeek through OpenAI-compatible format
 DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
-DEEPSEEK_MODEL = "deepseek-reasoner"
+DEEPSEEK_MODEL = "deepseek-chat"  # or "deepseek-reasoner" if you're using that
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Request schema
+# Schema
 class ArticleRequest(BaseModel):
     url: str
     country: str
     category: str
 
-# Custom OpenAI wrapper for DeepSeek
+# LangChain setup with DeepSeek
 llm = OpenAI(
-    temperature=0,
+    temperature=0.2,
     openai_api_base=DEEPSEEK_BASE_URL,
-    openai_api_key=os.getenv("OPENAI_API_KEY"),
+    openai_api_key=OPENAI_API_KEY,
     model_name=DEEPSEEK_MODEL
 )
 
 prompt = PromptTemplate(
     input_variables=["article"],
     template="""
-You are a world-class news summarizer. Summarize the article below in under 200 words.
+You are a professional news summarizer. Summarize the article below in under 200 words.
 
 ARTICLE:
 {article}
