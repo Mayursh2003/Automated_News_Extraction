@@ -4,34 +4,48 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from datetime import datetime
 from newspaper import Article
-from langchain_community.llms import OpenAI
-
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
 
 app = FastAPI()
 
-# Environment variables
+# Environment Variables
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
-AIRTABLE_TABLE_NAME = "News extractor"  # Change if needed
+AIRTABLE_TABLE_NAME = "News extractor"
 
-# DeepSeek API URL
-DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+DEEPSEEK_URL = "https://api.deepseek.com/v1/summarize"
 DEEPSEEK_MODEL = "deepseek-reasoner"
 
-# FastAPI request schema
+# Request schema
+class ArticleInput(BaseModel):
+    url: str
+
 @app.get("/")
 def root():
-    return {"message": "API is running!"}
+    return {"message": "FastAPI is live 🚀"}
 
-class ArticleRequest(BaseModel):
-    url: str
-    country: str
-    category: str
+# Helper to infer country and category
+def infer_country_category(text: str):
+    text_lower = text.lower()
+    country = "Global"
+    category = "General"
 
-def save_to_airtable(data: dict):
+    if "india" in text_lower:
+        country = "India"
+    elif "us" in text_lower or "america" in text_lower:
+        country = "USA"
+
+    if "finance" in text_lower or "stock" in text_lower:
+        category = "Finance"
+    elif "tech" in text_lower or "software" in text_lower:
+        category = "Technology"
+    elif "sports" in text_lower:
+        category = "Sports"
+
+    return country, category
+
+# Helper to save to Airtable
+def save_to_airtable(record: dict):
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
     headers = {
         "Authorization": f"Bearer {AIRTABLE_API_KEY}",
@@ -39,62 +53,60 @@ def save_to_airtable(data: dict):
     }
     payload = {
         "fields": {
-            "URL": data["url"],
-            "Country": data["country"],
-            "Category": data["category"],
-            "Headline": data["Headline"],
-            "Date": data["Date"],
-            "Summary": data["Summary"]
+            "URL": record["url"],
+            "Headline": record["title"],
+            "Date": record["date"],
+            "Country": record["country"],
+            "Category": record["category"],
+            "Summary": record["summary"]
         }
     }
-    response = requests.post(url, headers=headers, json=payload)
-    return response.status_code, response.text
+    return requests.post(url, headers=headers, json=payload)
 
 @app.post("/process_url")
-async def process_url(data: ArticleRequest):
+def process_url(payload: ArticleInput):
     try:
-        article = Article(data.url)
+        article = Article(payload.url)
         article.download()
         article.parse()
 
         if not article.text.strip():
-            return {"error": "No content extracted from article."}
+            return {"error": "Failed to extract article text."}
 
-        # Use DeepSeek to summarize
+        # Auto-extract
+        text = article.text
+        title = article.title.strip()
+        date = article.publish_date.strftime("%Y-%m-%d") if article.publish_date else datetime.utcnow().strftime("%Y-%m-%d")
+        country, category = infer_country_category(text)
+
+        # Call DeepSeek to summarize
         deepseek_response = requests.post(
-            f"{DEEPSEEK_BASE_URL}/summarize",
-            json={"model": DEEPSEEK_MODEL, "text": article.text},
-            headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"}
+            DEEPSEEK_URL,
+            headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
+            json={"model": DEEPSEEK_MODEL, "text": text}
         )
-        deepseek_data = deepseek_response.json()
 
-        # Extract summary from DeepSeek response
-        summary = deepseek_data.get('summary', 'No summary available.')
+        if deepseek_response.status_code != 200:
+            return {"error": "DeepSeek summarization failed."}
 
-        # Format publication date
-        pub_date = article.publish_date
-        if isinstance(pub_date, datetime):
-            pub_date = pub_date.strftime('%Y-%m-%d')
-        else:
-            pub_date = str(datetime.utcnow().date())
+        summary = deepseek_response.json().get("summary", "").strip()
 
         result = {
-            "url": data.url,
-            "country": data.country,
-            "category": data.category,
-            "Headline": article.title,
-            "Date": pub_date,
-            "Summary": summary.strip()
+            "url": payload.url,
+            "title": title,
+            "date": date,
+            "country": country,
+            "category": category,
+            "summary": summary
         }
 
-        # Save data to Airtable
-        save_to_airtable(result)
+        airtable_response = save_to_airtable(result)
 
-        return result
+        return {
+            "status": "success",
+            "data": result,
+            "airtable_status": airtable_response.status_code
+        }
 
     except Exception as e:
         return {"error": str(e)}
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000)
