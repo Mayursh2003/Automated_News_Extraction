@@ -1,6 +1,17 @@
 {
-    "scripts": {
-      "start": "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    "build": {
+      "type": "python",
+      "command": "pip install -r requirements.txt"
+    },
+    "start": {
+      "command": "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    },
+    "deploy": {
+      "env": {
+        "AIRTABLE_API_KEY": "pat9v6A8Gtgt7YJBW.1db41060c62cc46e2fa15841a9a2038b7e309306ddc4c32af81440942b603950",
+        "BASE_ID": "app4TiP7ZblxV2Wyh",
+        "TABLE_NAME": "News extractor"
+      }
     }
   }
   
