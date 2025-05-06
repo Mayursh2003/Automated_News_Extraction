@@ -97,6 +97,9 @@ def summarize_with_bart(text: str) -> str:
     except Exception as e:
         print(f"BART summarization failed: {str(e)}")
         return "Summary unavailable."
+@app.get("/")
+async def root():
+    return {"message": "News extractor is live"}
 
 @app.post("/process_url")
 async def process_url(payload: ArticleInput):
