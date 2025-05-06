@@ -7,11 +7,7 @@ from newspaper import Article
 from transformers import pipeline
 from langchain_core.documents import Document
 
-if __name__ == "__main__":
-    import uvicorn
-    import os
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+
 
 app = FastAPI()
 
@@ -144,3 +140,8 @@ async def process_url(payload: ArticleInput):
 
     except Exception as e:
         return {"error": str(e)}
+if __name__ == "__main__":
+    import uvicorn
+    import os
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
