@@ -91,7 +91,7 @@ def summarize_with_bart(text: str) -> str:
     try:
         chunks = [text[i:i+1024] for i in range(0, len(text), 1024)]
         summaries = [fallback_summarizer(chunk, max_length=150, min_length=30 do_sample=False)[0]['summary_text']
-                     for chunk in chunks[:5]  # limit to first 3 chunks
+                     for chunk in chunks[:]]  # limit to first 3 chunks
         return " ".join(summaries)
     except Exception as e:
         print(f"BART summarization failed: {str(e)}")
@@ -140,8 +140,3 @@ async def process_url(payload: ArticleInput):
 
     except Exception as e:
         return {"error": str(e)}
-if __name__ == "__main__":
-    import uvicorn
-    import os
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
