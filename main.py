@@ -1,11 +1,11 @@
 import os
 import requests
-import re
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request
 from pydantic import BaseModel, HttpUrl
 from datetime import datetime
 from newspaper import Article
-from time import sleep
+from transformers import pipeline
+from langchain_core.documents import Document
 
 app = FastAPI()
 
@@ -15,18 +15,16 @@ AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")
 AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 AIRTABLE_TABLE_NAME = "News extractor"
 
-DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
+DEEPSEEK_URL = "https://api.deepseek.com/v1/"
 DEEPSEEK_MODEL = "deepseek-chat"
 
-# Constants
-MAX_RETRIES = 2
-MAX_CHARS_FOR_SUMMARY = 4000
+# Fallback summarizer
+fallback_summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
-# Request Schema
 class ArticleInput(BaseModel):
-    url: HttpUrl  # Ensures URL is valid
+    url: HttpUrl
 
-# Helper: Infer Country & Category
+# Country/Category inference
 def infer_country_category(text: str):
     text_lower = text.lower()
     country = "Global"
@@ -36,50 +34,19 @@ def infer_country_category(text: str):
         country = "India"
     elif "us" in text_lower or "america" in text_lower:
         country = "USA"
-    elif "uk" in text_lower or "britain" in text_lower:
-        country = "UK"
+    elif "china" in text_lower:
+        country = "China"
 
     if "finance" in text_lower or "stock" in text_lower:
         category = "Finance"
-    elif "tech" in text_lower or "ai" in text_lower or "software" in text_lower:
+    elif "tech" in text_lower or "software" in text_lower:
         category = "Technology"
     elif "sports" in text_lower:
         category = "Sports"
-    elif "health" in text_lower or "medicine" in text_lower:
-        category = "Health"
 
     return country, category
 
-# Helper: Call DeepSeek API with retry logic
-def get_summary_from_deepseek(text: str) -> str:
-    headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    prompt = (
-        "Summarize the following news article in 4-5 concise sentences:\n\n" + text
-    )
-    payload = {
-        "model": DEEPSEEK_MODEL,
-        "messages": [
-            {"role": "system", "content": "You are a helpful summarization assistant."},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.7
-    }
-
-    for attempt in range(MAX_RETRIES):
-        response = requests.post(DEEPSEEK_URL, headers=headers, json=payload)
-        if response.status_code == 200:
-            try:
-                return response.json()["choices"][0]["message"]["content"].strip()
-            except Exception:
-                pass
-        sleep(1)  # wait before retrying
-    raise Exception("DeepSeek summarization failed after retries.")
-
-# Helper: Push data to Airtable
+# Airtable push
 def save_to_airtable(record: dict):
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
     headers = {
@@ -98,33 +65,63 @@ def save_to_airtable(record: dict):
     }
     return requests.post(url, headers=headers, json=payload)
 
-# Main Route
-@app.post("/process_url")
-def process_url(payload: ArticleInput):
+# DeepSeek summarizer
+def summarize_with_deepseek(text: str) -> str:
     try:
-        # Validate and parse article
-        article = Article(payload.url)
+        response = requests.post(
+            DEEPSEEK_URL,
+            headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
+            json={"model": DEEPSEEK_MODEL, "messages": [
+                {"role": "user", "content": f"Summarize this news article:\n\n{text}"}
+            ]}
+        )
+        result = response.json()
+        if response.status_code == 200 and "choices" in result:
+            return result["choices"][0]["message"]["content"].strip()
+        else:
+            raise Exception(result.get("error", {}).get("message", "DeepSeek error"))
+    except Exception as e:
+        print(f"DeepSeek failed: {str(e)}")
+        raise
+
+# BART summarizer fallback
+def summarize_with_bart(text: str) -> str:
+    try:
+        chunks = [text[i:i+1024] for i in range(0, len(text), 1024)]
+        summaries = [fallback_summarizer(chunk, max_length=150, min_length=40, do_sample=False)[0]['summary_text']
+                     for chunk in chunks[:3]]  # limit to first 3 chunks
+        return " ".join(summaries)
+    except Exception as e:
+        print(f"BART summarization failed: {str(e)}")
+        return "Summary unavailable."
+
+@app.post("/process_url")
+async def process_url(payload: ArticleInput):
+    try:
+        url = str(payload.url)
+
+        # Step 1: Extract Article
+        article = Article(url)
         article.download()
         article.parse()
 
         if not article.text.strip():
-            raise HTTPException(status_code=400, detail="Failed to extract article text.")
+            return {"error": "Failed to extract article text."}
 
-        # Extract info
-        text = article.text[:MAX_CHARS_FOR_SUMMARY]
+        text = article.text
         title = article.title.strip()
-        date = (
-            article.publish_date.strftime("%Y-%m-%d")
-            if article.publish_date
-            else datetime.utcnow().strftime("%Y-%m-%d")
-        )
+        date = article.publish_date.strftime("%Y-%m-%d") if article.publish_date else datetime.utcnow().strftime("%Y-%m-%d")
         country, category = infer_country_category(text)
 
-        # Summarize with DeepSeek
-        summary = get_summary_from_deepseek(text)
+        # Step 2: Try DeepSeek
+        try:
+            summary = summarize_with_deepseek(text)
+        except:
+            summary = summarize_with_bart(text)
 
+        # Step 3: Save and Return
         result = {
-            "url": payload.url,
+            "url": url,
             "title": title,
             "date": date,
             "country": country,
@@ -133,7 +130,6 @@ def process_url(payload: ArticleInput):
         }
 
         airtable_response = save_to_airtable(result)
-
         return {
             "status": "success",
             "data": result,
